@@ -25,7 +25,7 @@ SWING_WINDOW_RIGHT = 3
 MIN_SWING_EXCURSION_DOLLARS = 0  # nessun minimo in dollari
 
 # FVG detection
-FVG_LOOKBACK_CANDLES = 800  # fetch ~3.5 giorni di dati M5
+FVG_LOOKBACK_CANDLES = 600  # fetch ~3.5 giorni di dati M5
 
 # M1 confirmation
 M1_CONFIRMATION_BARS = 3

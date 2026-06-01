@@ -123,7 +123,9 @@ class IBClient:
 
         # Build a duration string long enough to cover *limit* bars plus
         # some headroom so IB does not complain about an undersized request.
-        if "min" in bar_size:
+        if timeframe == "5Min":
+            duration_str = "2 D"
+        elif "min" in bar_size:
             total_minutes = int(bar_size.split()[0]) * limit * 2
             if total_minutes < 60:
                 duration_str = f"{total_minutes * 60} S"

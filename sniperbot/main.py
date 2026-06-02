@@ -93,7 +93,9 @@ def run(force_now: bool = False, force_entry: str | None = None):
         min_excursion=MIN_SWING_EXCURSION_DOLLARS / 20,  # NQ: $20/point → $50 = 2.5 pts
     )
     fvg_detector = FVGDetector(lookback=FVG_LOOKBACK_CANDLES)
-    zonation = Zonation(min_excursion=5.0)  # $100 = 5 NQ points, Fib 0.5
+    # --- NUOVA ISTANZA ALLINEATA ---
+    # Specifichiamo chiaramente il range minimo di 100 dollari richiesto
+    zonation = Zonation(min_range_dollars=100.0, point_value=20.0)    
     confirmation = M1Confirmation(
         bars_needed=M1_BULLISH_NEEDED, total_bars=M1_CONFIRMATION_BARS,
     )
@@ -220,6 +222,10 @@ def run(force_now: bool = False, force_entry: str | None = None):
                                  f"({len([s for s in swings if s.type=='high'])}H/{len([s for s in swings if s.type=='low'])}L)")
 
                     current_price = df_m5["close"].iloc[-1]
+                    # Identifichiamo il prezzo di CHIUSURA dell'ultima candela M5 COMPLETATA (la penultima nel DataFrame)
+                    closed_m5_price = df_m5["close"].iloc[-2] 
+                    closed_m5_high = df_m5["high"].iloc[-2]
+                    closed_m5_low = df_m5["low"].iloc[-2]
 
                     # 2. Detect FVGs and update closure tracking (always, for debug visibility)
                     new_fvgs = fvg_detector.detect(df_m5)
@@ -261,13 +267,27 @@ def run(force_now: bool = False, force_entry: str | None = None):
                         logger.info(f"No zone: price={current_price:.0f}")
                         time.sleep(30)
                         continue
+                    # --- NUOVO CONTROLLO: VERIFICA SOVRAPPOSIZIONE PARZIALE FVG/ZONA ---
                     signal_fvg = None
                     for fvg in active_fvgs:
-                        if fvg_detector.is_price_inside(current_price, fvg):
-                            fvg_dir = "long" if fvg.type == "bullish" else "short"
-                            if fvg_dir == allowed_dir:
-                                signal_fvg = fvg
-                                break
+                        # 1. Controlliamo prima di tutto se la candela M5 si è CHIUSA dentro questo FVG
+                        if fvg_detector.is_price_inside(closed_m5_price, fvg):
+                            
+                            # 2. Se l'FVG è BULLISH, deve essere *almeno parzialmente* in DISCOUNT.
+                            # Significa che la parte bassa dell'FVG (fvg.bottom) deve trovarsi SOTTO il midpoint.
+                            if fvg.type == "bullish":
+                                if zonation.midpoint is not None and fvg.bottom < zonation.midpoint:
+                                    signal_fvg = fvg
+                                    allowed_dir = "long"
+                                    break # Setup valido trovato!
+                                    
+                            # 3. Se l'FVG è BEARISH, deve essere *almeno parzialmente* in PREMIUM.
+                            # Significa che la parte alta dell'FVG (fvg.top) deve trovarsi SOPRA il midpoint.
+                            elif fvg.type == "bearish":
+                                if zonation.midpoint is not None and fvg.top > zonation.midpoint:
+                                    signal_fvg = fvg
+                                    allowed_dir = "short"
+                                    break # Setup valido trovato!
 
                     if signal_fvg is None:
                         logger.info(f"No FVG match: zone={zone}, price={current_price:.0f}")
@@ -318,32 +338,41 @@ def run(force_now: bool = False, force_entry: str | None = None):
                         time.sleep(30)
                         continue
 
-                    # 8. Set initial SL at penultimate swing point
+                    # 8. Set initial SL at the exact swing point defining the range extreme (Orange Circle)
+                    initial_sl_swing = None
                     if allowed_dir == "long":
-                        lows = sorted(
-                            [s for s in swings if s.type == "low"],
-                            key=lambda s: s.index, reverse=True
-                        )
-                        penultimate_swing = lows[1] if len(lows) > 1 else lows[0] if lows else None
+                        # Cerchiamo lo swing low che corrisponde al minimo assoluto del nostro Dealing Range (Livello 1 Fib)
+                        for s in swings:
+                            if s.type == "low" and s.price == zonation.range_bottom:
+                                initial_sl_swing = s
+                                break
+                        # Fallback di sicurezza se non dovesse trovarlo per arrotondamenti
+                        if initial_sl_swing is None:
+                            lows = sorted([s for s in swings if s.type == "low"], key=lambda s: s.index, reverse=True)
+                            initial_sl_swing = lows[0] if lows else None
                     else:
-                        highs = sorted(
-                            [s for s in swings if s.type == "high"],
-                            key=lambda s: s.index, reverse=True
-                        )
-                        penultimate_swing = highs[1] if len(highs) > 1 else highs[0] if highs else None
+                        # Cerchiamo lo swing high che corrisponde al massimo assoluto del nostro Dealing Range (Livello 0 Fib)
+                        for s in swings:
+                            if s.type == "high" and s.price == zonation.range_top:
+                                initial_sl_swing = s
+                                break
+                        # Fallback di sicurezza se non dovesse trovarlo per arrotondamenti
+                        if initial_sl_swing is None:
+                            highs = sorted([s for s in swings if s.type == "high"], key=lambda s: s.index, reverse=True)
+                            initial_sl_swing = highs[0] if highs else None
 
-                    if penultimate_swing is None:
+                    if initial_sl_swing is None:
                         logger.info("No swing point for SL, skipping")
                         time.sleep(30)
                         continue
 
                     # 9. ENTRY
                     logger.info(f">>> ENTRY {allowed_dir.upper()} @ ~{current_price:.2f} "
-                                f"| SL={penultimate_swing.price:.2f} "
+                                f"| SL={initial_sl_swing.price:.2f} "
                                 f"| TP targets: {[f'{t.price:.2f}' for t in tp_levels[:3]]}")
 
                     entered = order_mgr.enter_trade(
-                        allowed_dir, current_price, penultimate_swing, tp_levels
+                        allowed_dir, current_price, initial_sl_swing, tp_levels
                     )
                     if entered:
                         in_trade = True

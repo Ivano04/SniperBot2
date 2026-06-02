@@ -8,43 +8,70 @@ class Zonation:
     PREMIUM = "premium"
     DISCOUNT = "discount"
 
-    def __init__(self, min_excursion: float = 5.0):
-        self.min_excursion = min_excursion  # minimum excursion for range-defining swings (price points)
+    def __init__(self, min_range_dollars: float = 100.0, point_value: float = 20.0):
+        # Converte i dollari in punti indice NQ (100.0 / 20.0 = 5.0 punti)
+        self.min_range_points = min_range_dollars / point_value  
+        
+        # Inizializziamo le variabili di stato pubbliche per renderle accessibili a main.py
+        self.range_top = None
+        self.range_bottom = None
+        self.midpoint = None
 
     def determine(self, price: float, swing_points: list[SwingPoint]) -> str | None:
         if not swing_points:
-            logger.info("Zonation: no swing points available")
+            logger.info("Zonation: nessun punto di swing disponibile")
             return None
 
-        # Filter: only swings >= $100 (= 5 NQ points)
-        highs = [s for s in swing_points if s.type == "high" and s.excursion_ticks >= self.min_excursion]
-        lows = [s for s in swing_points if s.type == "low" and s.excursion_ticks >= self.min_excursion]
+        # Ordiniamo tutti gli swing rilevati dal più recente al più vecchio (in base all'indice)
+        recent_swings = sorted(swing_points, key=lambda s: s.index, reverse=True)
 
-        if not highs or not lows:
-            logger.info(f"Zonation: need >={self.min_excursion}pt excursion -- "
-                        f"got {len(highs)} significant highs, {len(lows)} significant lows")
+        significant_high = None
+        significant_low = None
+
+        # Scansioniamo a ritroso gli swing per trovare la coppia High/Low più vicina con range >= 100$
+        for s in recent_swings:
+            if s.type == "high" and significant_high is None:
+                significant_high = s.price
+            elif s.type == "low" and significant_low is None:
+                significant_low = s.price
+
+            # Appena abbiamo un candidato massimo e un candidato minimo, verifichiamo l'escursione
+            if significant_high is not None and significant_low is not None:
+                range_amplitude = abs(significant_high - significant_low)
+                
+                if range_amplitude >= self.min_range_points:
+                    # Abbiamo trovato il Dealing Range valido di almeno 100$! Usciamo dal ciclo.
+                    break
+                else:
+                    # Se la distanza tra questo High e Low è inferiore a 100$, azzeriamo 
+                    # lo swing più vecchio tra i due per cercare più indietro nel tempo
+                    if s.type == "high":
+                        significant_high = None
+                    else:
+                        significant_low = None
+
+        # Se abbiamo esplorato lo storico senza trovare due punti idonei distanti almeno 100$
+        if significant_high is None or significant_low is None:
+            logger.info(f"Zonation: impossibile definire un range valido di almeno 100$ con gli swing attuali")
             return None
 
-        # Most recent significant swing defines the range (ICT dealing range)
-        significant_high = max(highs, key=lambda s: s.index)
-        significant_low = max(lows, key=lambda s: s.index)
-
-        range_top = significant_high.price
-        range_bottom = significant_low.price
-        midpoint = (range_top + range_bottom) / 2  # Fibonacci 0.5
+        # Salviamo i valori strutturali sull'istanza (self) per renderli accessibili all'esterno (es. main.py)
+        self.range_top = significant_high
+        self.range_bottom = significant_low
+        self.midpoint = (self.range_top + self.range_bottom) / 2  # Equilibrio (Fibonacci 0.5)
 
         logger.info(
-            f"Zonation: top={range_top:.0f} mid={midpoint:.0f} bottom={range_bottom:.0f} "
-            f"price={price:.0f} -> "
-            f"{'PREMIUM' if midpoint < price < range_top else 'DISCOUNT' if range_bottom < price < midpoint else 'OUT OF RANGE (price ' + ('above top' if price >= range_top else 'below bottom') + ')'}"
+            f"Zonation (Range 100$+): top={self.range_top:.2f} mid={self.midpoint:.2f} bottom={self.range_bottom:.2f} "
+            f"price={price:.2f} -> "
+            f"{'PREMIUM' if self.midpoint < price < self.range_top else 'DISCOUNT' if self.range_bottom < price < self.midpoint else 'OUT OF RANGE'}"
         )
 
-        # Premium: upper half (Fib 0%-50%), only SHORT
-        if midpoint < price < range_top:
+        # Premium: metà superiore (valuta solo SHORT)
+        if self.midpoint < price < self.range_top:
             return self.PREMIUM
 
-        # Discount: lower half (Fib 50%-100%), only LONG
-        if range_bottom < price < midpoint:
+        # Discount: metà inferiore (valuta solo LONG)
+        if self.range_bottom < price < self.midpoint:
             return self.DISCOUNT
 
         return None

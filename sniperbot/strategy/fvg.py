@@ -22,28 +22,30 @@ class FVGDetector:
             return []
 
         fvgs = []
-        # Scan all bars — FVGs have no expiry, they persist until closed
-        start_idx = 0
+        # Limita la scansione al lookback configurato per massima efficienza
+        start_idx = max(0, len(df) - self.lookback)
 
         for i in range(start_idx, len(df) - 2):
             ts = df.index[i]
 
-            # Bullish FVG: low[i] > high[i+2]
-            if df["low"].iloc[i] > df["high"].iloc[i + 2]:
+            # 1. CORRETTO BULLISH FVG: Il massimo di C1 è inferiore al minimo di C3
+            # Il mercato si è espanso verso l'alto lasciando un'inefficienza vuota.
+            if df["high"].iloc[i] < df["low"].iloc[i + 2]:
                 fvgs.append(FVG(
                     type="bullish",
-                    top=df["low"].iloc[i],
-                    bottom=df["high"].iloc[i + 2],
+                    top=df["low"].iloc[i + 2],   # Il minimo di C3 è il tetto del gap
+                    bottom=df["high"].iloc[i],  # Il massimo di C1 è il fondo del gap
                     start_index=i,
                     start_timestamp=ts.to_pydatetime(),
                 ))
 
-            # Bearish FVG: high[i] < low[i+2]
-            if df["high"].iloc[i] < df["low"].iloc[i + 2]:
+            # 2. CORRETTO BEARISH FVG: Il minimo di C1 è superiore al massimo di C3
+            # Il mercato è crollato verso il basso lasciando un'inefficienza vuota.
+            elif df["low"].iloc[i] > df["high"].iloc[i + 2]:
                 fvgs.append(FVG(
                     type="bearish",
-                    top=df["low"].iloc[i + 2],
-                    bottom=df["high"].iloc[i],
+                    top=df["low"].iloc[i],       # Il minimo di C1 è il tetto del gap
+                    bottom=df["high"].iloc[i + 2], # Il massimo di C3 è il fondo del gap
                     start_index=i,
                     start_timestamp=ts.to_pydatetime(),
                 ))
@@ -51,7 +53,7 @@ class FVGDetector:
         return fvgs
 
     def is_price_inside(self, price: float, fvg: FVG) -> bool:
-        return fvg.bottom < price < fvg.top
+        return fvg.bottom <= price <= fvg.top
 
     def update_closure(self, fvgs: list[FVG], df_recent: pd.DataFrame) -> list[FVG]:
         if df_recent.empty:
@@ -60,16 +62,27 @@ class FVGDetector:
         for fvg in fvgs:
             if fvg.closed:
                 continue
-            # Only check bars AFTER the FVG was created
+            
+            # Un FVG può essere chiuso solo dalle candele SUCCESSIVE alla sua formazione (C+3)
             start = fvg.start_index + 3
+            if start >= len(df_recent):
+                continue
+
             for i in range(start, len(df_recent)):
-                close = df_recent["close"].iloc[i]
+                # Recuperiamo i minimi e massimi assoluti (corpi o ombre) delle candele successive
+                low_price = df_recent["low"].iloc[i]
+                high_price = df_recent["high"].iloc[i + 2] if (i + 2) < len(df_recent) else df_recent["high"].iloc[i]
+
                 if fvg.type == "bullish":
-                    if close <= fvg.bottom:
+                    # Un FVG Rialzista è chiuso se il minimo di una candela successiva 
+                    # scende a coprire interamente il gap (raggiungendo o superando il bottom)
+                    if df_recent["low"].iloc[i] <= fvg.bottom:
                         fvg.closed = True
                         break
                 else:
-                    if close >= fvg.top:
+                    # Un FVG Ribassista è chiuso se il massimo di una candela successiva 
+                    # sale a coprire interamente il gap (raggiungendo o superando il top)
+                    if df_recent["high"].iloc[i] >= fvg.top:
                         fvg.closed = True
                         break
 

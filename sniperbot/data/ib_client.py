@@ -46,7 +46,7 @@ class IBClient:
         """
         try:
             self.ib.connect(self.host, self.port, clientId=self.client_id)
-            self.ib.reqMarketDataType(3)  # 3 = delayed (not frozen, needed for historical data)
+            self.ib.reqMarketDataType(1)  # 1 = real-time (not frozen, needed for historical data)
             self._connected = True
             return True
         except Exception:

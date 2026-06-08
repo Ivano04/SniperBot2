@@ -298,19 +298,33 @@ def run(force_now: bool = False, force_entry: str | None = None):
                                 f"Zone={zone}, FVG={signal_fvg.type}, "
                                 f"Price={current_price}, Gap=({signal_fvg.bottom:.2f}-{signal_fvg.top:.2f})")
 
-                    # 5. Wait for M1 confirmation
-                    time.sleep(60)
+                    # 5. Wait for M1 confirmation (Attesa dinamica e sincronizzata delle prossime 3 candele M1)
+                    tempo_di_innesco = datetime.now()
+                    target_time = tempo_di_innesco + timedelta(minutes=3)
+
+                    logger.info(
+                        f"Setup FVG rilevato alle {tempo_di_innesco.strftime('%H:%M:%S')}. "
+                        f"Attendo la formazione completa delle prossime 3 candele M1 fino alle {target_time.strftime('%H:%M:%S')}..."
+                    )
+
+                    # Ciclo di attesa controllato fino allo scadere dei 3 minuti richiesti
+                    while datetime.now() < target_time:
+                        time.sleep(5)  # Verifica ogni 5 secondi senza bloccare l'esecuzione o l'ascolto di segnali
+
+                    logger.info("I 3 minuti M1 sono trascorsi. Recupero le barre dal broker...")
 
                     df_m1 = pd.DataFrame()
                     for attempt in range(MAX_RETRIES):
                         try:
-                            df_m1 = ib_client.fetch_bars(SYMBOL, "1Min", limit=M1_CONFIRMATION_BARS + 5)
+                            # Richiediamo esattamente 3 barre (le 3 appena generate dopo il close M5)
+                            df_m1 = ib_client.fetch_bars(SYMBOL, "1Min", limit=10)
                             break
-                        except Exception:
+                        except Exception as e:
+                            logger.warning(f"Fetch M1 fallito (tentativo {attempt+1}): {e}")
                             time.sleep(RETRY_BASE_DELAY * (2 ** attempt))
 
-                    if len(df_m1) < M1_CONFIRMATION_BARS:
-                        logger.debug("Insufficient M1 data for confirmation")
+                    if df_m1.empty or len(df_m1) < 3:
+                        logger.warning("Dati M1 insufficienti o incompleti per la conferma, skip ciclo")
                         time.sleep(30)
                         continue
 

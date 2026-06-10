@@ -229,9 +229,19 @@ def run(force_now: bool = False, force_entry: str | None = None):
 
                     # 2. Detect FVGs and update closure tracking (always, for debug visibility)
                     new_fvgs = fvg_detector.detect(df_m5)
-                    # Deduplicate: only add FVGs not already tracked (unique by start_timestamp + type)
-                    seen = {(f.start_timestamp, f.type) for f in active_fvgs}
-                    unique_new = [f for f in new_fvgs if (f.start_timestamp, f.type) not in seen]
+                    # Deduplicate by (start_timestamp, type). When the same FVG is
+                    # re-detected in a later cycle (e.g., because the forming candle
+                    # that served as C3 now has its final OHLC), refresh top/bottom
+                    # in-place so downstream checks use the correct values.
+                    seen = {(f.start_timestamp, f.type): f for f in active_fvgs}
+                    unique_new = []
+                    for f in new_fvgs:
+                        key = (f.start_timestamp, f.type)
+                        if key in seen:
+                            seen[key].top = f.top
+                            seen[key].bottom = f.bottom
+                        else:
+                            unique_new.append(f)
                     all_fvgs = fvg_detector.update_closure(active_fvgs + unique_new, df_m5)
                     active_fvgs = [f for f in all_fvgs if not f.closed]
                     closed_fvgs = [f for f in all_fvgs if f.closed]
@@ -300,12 +310,12 @@ def run(force_now: bool = False, force_entry: str | None = None):
                                 f"Zone={zone}, FVG={signal_fvg.type}, "
                                 f"Price={current_price}, Gap=({signal_fvg.bottom:.2f}-{signal_fvg.top:.2f})")
 
-                    # 5. Wait for M1 confirmation (Attesa dinamica e sincronizzata delle prossime 3 candele M1)
-                    tempo_di_innesco = datetime.now()
-                    target_time = tempo_di_innesco + timedelta(minutes=3)
+                    # 5. Wait for M1 confirmation (ancorato al timestamp di chiusura della M5 che ha triggerato il segnale)
+                    m5_trigger_ts = df_m5.index[-2].to_pydatetime()
+                    target_time = m5_trigger_ts + timedelta(minutes=3, seconds=30)
 
                     logger.info(
-                        f"Setup FVG rilevato alle {tempo_di_innesco.strftime('%H:%M:%S')}. "
+                        f"Setup FVG rilevato (M5 close={m5_trigger_ts.strftime('%H:%M:%S')}). "
                         f"Attendo la formazione completa delle prossime 3 candele M1 fino alle {target_time.strftime('%H:%M:%S')}..."
                     )
 
@@ -393,6 +403,8 @@ def run(force_now: bool = False, force_entry: str | None = None):
                     if entered:
                         in_trade = True
                         logger.info("Order submitted successfully")
+                        # Let IB update its position list before the next loop iteration
+                        time.sleep(2)
                     # Il motivo specifico del rifiuto è già loggato da OrderManager.enter_trade()
 
                 else:

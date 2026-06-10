@@ -22,10 +22,12 @@ class FVGDetector:
             return []
 
         fvgs = []
-        # Limita la scansione al lookback configurato per massima efficienza
+        # Limita la scansione al lookback configurato per massima efficienza.
+        # len(df)-3 garantisce che C3 (i+2) sia sempre una candela già chiusa,
+        # mai quella in formazione (ultima barra del DataFrame).
         start_idx = max(0, len(df) - self.lookback)
 
-        for i in range(start_idx, len(df) - 2):
+        for i in range(start_idx, len(df) - 3):
             ts = df.index[i]
 
             # 1. CORRETTO BULLISH FVG: Il massimo di C1 è inferiore al minimo di C3

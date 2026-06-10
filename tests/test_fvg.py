@@ -19,8 +19,8 @@ def make_df(highs: list[float], lows: list[float]) -> pd.DataFrame:
 class TestFVGDetector:
     def test_detects_bullish_fvg(self):
         # Bullish: high[C1] < low[C3]  →  bottom=high[C1], top=low[C3]
-        highs = [310, 308, 305, 307, 308]
-        lows  = [309, 307, 304, 306, 307]
+        highs = [310, 308, 305, 307, 308, 310]
+        lows  = [309, 307, 304, 306, 307, 309]
         df = make_df(highs, lows)
         detector = FVGDetector(lookback=10)
         fvgs = detector.detect(df)
@@ -94,7 +94,7 @@ class TestFVGDetector:
         highs = [310, 308, 305, 307, 308, 310, 308, 305, 307, 308]
         lows = [309, 307, 304, 306, 307, 309, 307, 304, 306, 307]
         df = make_df(highs, lows)
-        detector = FVGDetector(lookback=3)
+        detector = FVGDetector(lookback=4)
         fvgs = detector.detect(df)
         for f in fvgs:
-            assert f.start_index >= len(df) - 3
+            assert f.start_index >= len(df) - 4

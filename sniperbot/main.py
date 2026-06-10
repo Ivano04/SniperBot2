@@ -409,10 +409,16 @@ def run(force_now: bool = False, force_entry: str | None = None):
 
                 else:
                     # === IN TRADE: monitor for trailing SL and TP ===
-                    position = ib_client.get_position(SYMBOL)
+                    # IB positions are async — retry a few times before concluding the position is gone
+                    position = None
+                    for retry in range(5):
+                        position = ib_client.get_position(SYMBOL)
+                        if position is not None:
+                            break
+                        time.sleep(1)
                     if position is None:
                         in_trade = False
-                        logger.info("Position closed — returning to monitoring")
+                        logger.warning("Position not found after 5 retries — returning to monitoring")
                         continue
 
                     current_price = position["current_price"]

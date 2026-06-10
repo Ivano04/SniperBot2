@@ -18,32 +18,34 @@ def make_df(highs: list[float], lows: list[float]) -> pd.DataFrame:
 
 class TestFVGDetector:
     def test_detects_bullish_fvg(self):
-        # Bullish: low[i] > high[i+2]
+        # Bullish: high[C1] < low[C3]  →  bottom=high[C1], top=low[C3]
         highs = [310, 308, 305, 307, 308]
-        lows = [309, 307, 304, 306, 307]
+        lows  = [309, 307, 304, 306, 307]
         df = make_df(highs, lows)
         detector = FVGDetector(lookback=10)
         fvgs = detector.detect(df)
 
         bullish = [f for f in fvgs if f.type == "bullish"]
         assert len(bullish) >= 1
+        # FVG at i=2: high[2]=305 < low[4]=307  →  bottom=high[2]=305, top=low[4]=307
         fvg = bullish[0]
-        assert fvg.bottom == 305.0  # high[i+2]
-        assert fvg.top == 309.0     # low[i]
+        assert fvg.bottom == 305.0  # high[C1]
+        assert fvg.top == 307.0     # low[C3]
 
     def test_detects_bearish_fvg(self):
-        # Bearish: high[i] < low[i+2]
-        highs = [305, 307, 308, 307, 308]
-        lows = [304, 306, 308, 306, 307]
+        # Bearish: low[C1] > high[C3]  →  top=low[C1], bottom=high[C3]
+        highs = [310, 308, 304, 302, 305]
+        lows  = [308, 306, 302, 300, 303]
         df = make_df(highs, lows)
         detector = FVGDetector(lookback=10)
         fvgs = detector.detect(df)
 
         bearish = [f for f in fvgs if f.type == "bearish"]
         assert len(bearish) >= 1
+        # FVG at i=0: low[0]=308 > high[2]=304  →  top=low[0]=308, bottom=high[2]=304
         fvg = bearish[0]
-        assert fvg.top == 308.0    # low[i+2]
-        assert fvg.bottom == 305.0  # high[i]
+        assert fvg.top == 308.0     # low[C1]
+        assert fvg.bottom == 304.0  # high[C3]
 
     def test_no_fvg_when_candles_overlap(self):
         highs = [310, 310, 310, 310, 310]

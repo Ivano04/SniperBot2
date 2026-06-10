@@ -62,9 +62,16 @@ class FVGDetector:
         for fvg in fvgs:
             if fvg.closed:
                 continue
-            
+
+            # Find the FVG's current position in this DataFrame by timestamp
+            # (start_index is volatile across fetch cycles — timestamp is stable)
+            try:
+                start_pos = df_recent.index.get_loc(fvg.start_timestamp)
+            except KeyError:
+                continue  # bar no longer in DataFrame
+
             # Un FVG può essere chiuso solo dalle candele SUCCESSIVE alla sua formazione (C+3)
-            start = fvg.start_index + 3
+            start = start_pos + 3
             if start >= len(df_recent):
                 continue
 

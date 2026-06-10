@@ -1,7 +1,11 @@
+import logging
+
 from sniperbot.strategy.swing_points import SwingPoint
 from sniperbot.strategy.targets import LiquidityLevel
 from sniperbot.data.ib_client import IBClient
 from sniperbot.execution.risk_manager import RiskManager
+
+logger = logging.getLogger(__name__)
 
 
 class OrderManager:
@@ -17,6 +21,9 @@ class OrderManager:
                     initial_sl_swing: SwingPoint,
                     tp_levels: list[LiquidityLevel]) -> bool:
         if not self.risk_manager.can_trade():
+            logger.warning("Entry rejected by RISK MANAGER (session_active=%s, daily_loss=%s)",
+                           self.risk_manager._session_active,
+                           self.risk_manager.daily_loss_hit())
             return False
 
         side = "buy" if direction == "long" else "sell"
@@ -30,12 +37,18 @@ class OrderManager:
             stop_loss=initial_sl_price,
         )
 
-        if result and result.get("status") in ("Filled", "Submitted", "PreSubmitted"):
+        # "PendingSubmit" è lo stato iniziale dell'ordine prima che IB
+        # lo promuova a PreSubmitted/Submitted; va accettato.
+        if result and result.get("status") in ("Filled", "Submitted", "PreSubmitted", "PendingSubmit"):
             self._current_sl = initial_sl_price
             self._tp_levels = tp_levels
             self._entry_price = entry_price
             self._direction = direction
             return True
+
+        logger.warning("Entry rejected by BROKER — order_id=%s, status=%s",
+                       result.get("id") if result else "None",
+                       result.get("status") if result else "None")
         return False
 
     def update_trailing_sl(self, new_swing: SwingPoint, current_sl: float,

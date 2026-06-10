@@ -229,9 +229,9 @@ def run(force_now: bool = False, force_entry: str | None = None):
 
                     # 2. Detect FVGs and update closure tracking (always, for debug visibility)
                     new_fvgs = fvg_detector.detect(df_m5)
-                    # Deduplicate: only add FVGs not already tracked (unique by start_index + type)
-                    seen = {(f.start_index, f.type) for f in active_fvgs}
-                    unique_new = [f for f in new_fvgs if (f.start_index, f.type) not in seen]
+                    # Deduplicate: only add FVGs not already tracked (unique by start_timestamp + type)
+                    seen = {(f.start_timestamp, f.type) for f in active_fvgs}
+                    unique_new = [f for f in new_fvgs if (f.start_timestamp, f.type) not in seen]
                     all_fvgs = fvg_detector.update_closure(active_fvgs + unique_new, df_m5)
                     active_fvgs = [f for f in all_fvgs if not f.closed]
                     closed_fvgs = [f for f in all_fvgs if f.closed]
@@ -250,17 +250,19 @@ def run(force_now: bool = False, force_entry: str | None = None):
                         if allowed_dir:
                             match = " * MATCH" if (f.type == "bullish" and allowed_dir == "long") or (f.type == "bearish" and allowed_dir == "short") else ""
                         logger.info(f"  [{f.type:>7}] gap={f.bottom:.0f}-{f.top:.0f}  (range={f.top - f.bottom:.0f}pt){inside}{match}")
-                        i = f.start_index
-                        if i + 2 < len(df_m5):
-                            c0 = df_m5.iloc[i]
-                            c1 = df_m5.iloc[i + 1]
-                            c2 = df_m5.iloc[i + 2]
-                            ts0 = str(df_m5.index[i]).split(" ")[-1][:5] if " " in str(df_m5.index[i]) else str(df_m5.index[i])[:5]
-                            logger.info(f"       C{i} [{ts0}] O={c0['open']:.0f} H={c0['high']:.0f} L={c0['low']:.0f} C={c0['close']:.0f}")
-                            ts1 = str(df_m5.index[i+1]).split(" ")[-1][:5] if " " in str(df_m5.index[i+1]) else str(df_m5.index[i+1])[:5]
-                            logger.info(f"       C{i+1} [{ts1}] O={c1['open']:.0f} H={c1['high']:.0f} L={c1['low']:.0f} C={c1['close']:.0f}")
-                            ts2 = str(df_m5.index[i+2]).split(" ")[-1][:5] if " " in str(df_m5.index[i+2]) else str(df_m5.index[i+2])[:5]
-                            logger.info(f"       C{i+2} [{ts2}] O={c2['open']:.0f} H={c2['high']:.0f} L={c2['low']:.0f} C={c2['close']:.0f}")
+                        ts = f.start_timestamp
+                        if ts in df_m5.index:
+                            pos = df_m5.index.get_loc(ts)
+                            if pos + 2 < len(df_m5):
+                                c0 = df_m5.iloc[pos]
+                                c1 = df_m5.iloc[pos + 1]
+                                c2 = df_m5.iloc[pos + 2]
+                                ts0 = str(df_m5.index[pos])[:16]
+                                logger.info(f"       C{pos} [{ts0}] O={c0['open']:.0f} H={c0['high']:.0f} L={c0['low']:.0f} C={c0['close']:.0f}")
+                                ts1 = str(df_m5.index[pos+1])[:16]
+                                logger.info(f"       C{pos+1} [{ts1}] O={c1['open']:.0f} H={c1['high']:.0f} L={c1['low']:.0f} C={c1['close']:.0f}")
+                                ts2 = str(df_m5.index[pos+2])[:16]
+                                logger.info(f"       C{pos+2} [{ts2}] O={c2['open']:.0f} H={c2['high']:.0f} L={c2['low']:.0f} C={c2['close']:.0f}")
                     # ----------------------------------------------------------
 
                     if zone is None:
@@ -391,8 +393,7 @@ def run(force_now: bool = False, force_entry: str | None = None):
                     if entered:
                         in_trade = True
                         logger.info("Order submitted successfully")
-                    else:
-                        logger.warning("Entry rejected by risk manager or broker")
+                    # Il motivo specifico del rifiuto è già loggato da OrderManager.enter_trade()
 
                 else:
                     # === IN TRADE: monitor for trailing SL and TP ===

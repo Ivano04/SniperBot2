@@ -346,6 +346,15 @@ def run(force_now: bool = False, force_entry: str | None = None):
 
                     # 6. Check 2/3 confirmation
                     m1_confirmed = confirmation.check(df_m1, allowed_dir)
+
+                    # Log the last 3 M1 candles used for confirmation
+                    last3 = df_m1.iloc[-3:]
+                    for idx, (ts, row) in enumerate(last3.iterrows()):
+                        ts_str = str(ts)[:16]
+                        bull = "▲" if row["close"] > row["open"] else ("▼" if row["close"] < row["open"] else "─")
+                        logger.info(f"  M1[{idx}] [{ts_str}] O={row['open']:.1f} H={row['high']:.1f} "
+                                    f"L={row['low']:.1f} C={row['close']:.1f} {bull}")
+
                     if not m1_confirmed:
                         logger.info(f"M1 2/3 NOT confirmed for {allowed_dir}")
                         time.sleep(30)

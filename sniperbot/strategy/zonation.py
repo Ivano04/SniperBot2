@@ -22,8 +22,8 @@ class Zonation:
             logger.info("Zonation: nessun punto di swing disponibile")
             return None
 
-        # Ordiniamo tutti gli swing rilevati dal più recente al più vecchio (in base all'indice)
-        recent_swings = sorted(swing_points, key=lambda s: s.index, reverse=True)
+        # Ordiniamo tutti gli swing rilevati dal più recente al più vecchio (in base al timestamp)
+        recent_swings = sorted(swing_points, key=lambda s: s.timestamp, reverse=True)
 
         significant_high = None
         significant_low = None

@@ -1,3 +1,4 @@
+import math
 import time
 import signal
 import sys
@@ -328,12 +329,15 @@ def run(force_now: bool = False, force_entry: str | None = None):
                     df_m1 = pd.DataFrame()
                     for attempt in range(MAX_RETRIES):
                         try:
-                            # Richiediamo esattamente 3 barre (le 3 appena generate dopo il close M5)
                             df_m1 = ib_client.fetch_bars(SYMBOL, "1Min", limit=10)
                             break
                         except Exception as e:
                             logger.warning(f"Fetch M1 fallito (tentativo {attempt+1}): {e}")
                             time.sleep(RETRY_BASE_DELAY * (2 ** attempt))
+
+                    # Keep only M1 bars formed AFTER the triggering M5 close (Bug 7)
+                    if not df_m1.empty:
+                        df_m1 = df_m1[df_m1.index >= pd.Timestamp(m5_trigger_ts)]
 
                     if df_m1.empty or len(df_m1) < 3:
                         logger.warning("Dati M1 insufficienti o incompleti per la conferma, skip ciclo")
@@ -349,14 +353,22 @@ def run(force_now: bool = False, force_entry: str | None = None):
 
                     logger.info(f"M1 2/3 CONFIRMED for {allowed_dir}")
 
-                    # 7. Calculate TP levels
+                    # 6b. Re-verify FVG is still valid after the wait (Bug 6)
+                    latest_price = df_m1["close"].iloc[-1]
+                    if not fvg_detector.is_price_inside(latest_price, signal_fvg):
+                        logger.info(f"FVG no longer valid after M1 wait (price={latest_price:.0f}), skipping")
+                        time.sleep(30)
+                        continue
+
+                    # 7. Calculate TP levels using the refreshed price (Bug 5)
+                    entry_price = latest_price
                     if allowed_dir == "long":
                         tp_levels = target_calc.get_targets_for_long(
-                            current_price, swings, None, None, None
+                            entry_price, swings, None, None, None
                         )
                     else:
                         tp_levels = target_calc.get_targets_for_short(
-                            current_price, swings, None, None, None
+                            entry_price, swings, None, None, None
                         )
 
                     if not tp_levels:
@@ -369,22 +381,22 @@ def run(force_now: bool = False, force_entry: str | None = None):
                     if allowed_dir == "long":
                         # Cerchiamo lo swing low che corrisponde al minimo assoluto del nostro Dealing Range (Livello 1 Fib)
                         for s in swings:
-                            if s.type == "low" and s.price == zonation.range_bottom:
+                            if s.type == "low" and math.isclose(s.price, zonation.range_bottom):
                                 initial_sl_swing = s
                                 break
                         # Fallback di sicurezza se non dovesse trovarlo per arrotondamenti
                         if initial_sl_swing is None:
-                            lows = sorted([s for s in swings if s.type == "low"], key=lambda s: s.index, reverse=True)
+                            lows = sorted([s for s in swings if s.type == "low"], key=lambda s: s.timestamp, reverse=True)
                             initial_sl_swing = lows[0] if lows else None
                     else:
                         # Cerchiamo lo swing high che corrisponde al massimo assoluto del nostro Dealing Range (Livello 0 Fib)
                         for s in swings:
-                            if s.type == "high" and s.price == zonation.range_top:
+                            if s.type == "high" and math.isclose(s.price, zonation.range_top):
                                 initial_sl_swing = s
                                 break
                         # Fallback di sicurezza se non dovesse trovarlo per arrotondamenti
                         if initial_sl_swing is None:
-                            highs = sorted([s for s in swings if s.type == "high"], key=lambda s: s.index, reverse=True)
+                            highs = sorted([s for s in swings if s.type == "high"], key=lambda s: s.timestamp, reverse=True)
                             initial_sl_swing = highs[0] if highs else None
 
                     if initial_sl_swing is None:
@@ -393,12 +405,12 @@ def run(force_now: bool = False, force_entry: str | None = None):
                         continue
 
                     # 9. ENTRY
-                    logger.info(f">>> ENTRY {allowed_dir.upper()} @ ~{current_price:.2f} "
+                    logger.info(f">>> ENTRY {allowed_dir.upper()} @ ~{entry_price:.2f} "
                                 f"| SL={initial_sl_swing.price:.2f} "
                                 f"| TP targets: {[f'{t.price:.2f}' for t in tp_levels[:3]]}")
 
                     entered = order_mgr.enter_trade(
-                        allowed_dir, current_price, initial_sl_swing, tp_levels
+                        allowed_dir, entry_price, initial_sl_swing, tp_levels
                     )
                     if entered:
                         in_trade = True
@@ -434,10 +446,10 @@ def run(force_now: bool = False, force_entry: str | None = None):
                     df_m5_latest = ib_client.fetch_bars(SYMBOL, "5Min", limit=20)
                     new_swings = swing_detector.detect(df_m5_latest)
 
-                    # Filter to swings that formed AFTER entry
-                    if order_mgr._entry_price is not None:
-                        new_swings = [s for s in new_swings
-                                      if s.price not in [sp.price for sp in swings]]
+                    # Filter to swings that formed AFTER entry (by timestamp, not price)
+                    old_timestamps = {s.timestamp for s in swings}
+                    new_swings = [s for s in new_swings
+                                  if s.timestamp not in old_timestamps]
 
                     for ns in new_swings:
                         if ns.type == ("low" if order_mgr._direction == "long" else "high"):

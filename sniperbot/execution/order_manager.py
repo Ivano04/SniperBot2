@@ -79,5 +79,10 @@ class OrderManager:
         return False
 
     def close_position(self) -> bool:
+        # Snapshot unrealized PnL before flattening so risk manager stays accurate
+        position = self.ib.get_position("NQ")
+        if position is not None:
+            self.risk_manager.update_pnl(position.get("unrealized_pl", 0))
+
         result = self.ib.close_position("NQ")
         return result.get("status") != "error"

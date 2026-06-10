@@ -312,16 +312,16 @@ def run(force_now: bool = False, force_entry: str | None = None):
 
                     # 5. Wait for M1 confirmation (ancorato al timestamp di chiusura della M5 che ha triggerato il segnale)
                     m5_trigger_ts = df_m5.index[-2].to_pydatetime()
-                    target_time = m5_trigger_ts + timedelta(minutes=3, seconds=30)
+                    target_epoch = m5_trigger_ts.timestamp() + 210  # 3 min + 30 s buffer
 
                     logger.info(
                         f"Setup FVG rilevato (M5 close={m5_trigger_ts.strftime('%H:%M:%S')}). "
-                        f"Attendo la formazione completa delle prossime 3 candele M1 fino alle {target_time.strftime('%H:%M:%S')}..."
+                        f"Attendo la formazione completa delle prossime 3 candele M1..."
                     )
 
-                    # Ciclo di attesa controllato fino allo scadere dei 3 minuti richiesti
-                    while datetime.now() < target_time:
-                        time.sleep(5)  # Verifica ogni 5 secondi senza bloccare l'esecuzione o l'ascolto di segnali
+                    # Attesa attiva fino allo scadere del tempo richiesto
+                    while time.time() < target_epoch:
+                        time.sleep(5)
 
                     logger.info("I 3 minuti M1 sono trascorsi. Recupero le barre dal broker...")
 

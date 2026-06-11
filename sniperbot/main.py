@@ -261,20 +261,28 @@ def run(force_now: bool = False, force_entry: str | None = None):
                         if allowed_dir:
                             match = " * MATCH" if (f.type == "bullish" and allowed_dir == "long") or (f.type == "bearish" and allowed_dir == "short") else ""
                         logger.info(f"  [{f.type:>7}] gap={f.bottom:.0f}-{f.top:.0f}  (range={f.top - f.bottom:.0f}pt){inside}{match}")
+                        
                         ts = f.start_timestamp
                         if ts in df_m5.index:
                             pos = df_m5.index.get_loc(ts)
                             if pos + 2 < len(df_m5):
+                                # Funzione per forzare la visualizzazione sul fuso orario del grafico IBKR
+                                def format_ib_ts(pandas_ts):
+                                    if pandas_ts.tz is not None:
+                                        return str(pandas_ts.tz_convert("US/Central"))[:16]
+                                    # Se i dati storici non hanno la timezone attiva, rimuoviamo manualmente le 6 ore di differenza
+                                    return str(pandas_ts - timedelta(hours=6))[:16]
+
                                 c0 = df_m5.iloc[pos]
                                 c1 = df_m5.iloc[pos + 1]
                                 c2 = df_m5.iloc[pos + 2]
-                                ts0 = str(df_m5.index[pos])[:16]
+                                
+                                ts0 = format_ib_ts(df_m5.index[pos])
                                 logger.info(f"       C{pos} [{ts0}] O={c0['open']:.0f} H={c0['high']:.0f} L={c0['low']:.0f} C={c0['close']:.0f}")
-                                ts1 = str(df_m5.index[pos+1])[:16]
+                                ts1 = format_ib_ts(df_m5.index[pos+1])
                                 logger.info(f"       C{pos+1} [{ts1}] O={c1['open']:.0f} H={c1['high']:.0f} L={c1['low']:.0f} C={c1['close']:.0f}")
-                                ts2 = str(df_m5.index[pos+2])[:16]
+                                ts2 = format_ib_ts(df_m5.index[pos+2])
                                 logger.info(f"       C{pos+2} [{ts2}] O={c2['open']:.0f} H={c2['high']:.0f} L={c2['low']:.0f} C={c2['close']:.0f}")
-                    # ----------------------------------------------------------
 
                     if zone is None:
                         logger.info(f"No zone: price={current_price:.0f}")
@@ -350,11 +358,16 @@ def run(force_now: bool = False, force_entry: str | None = None):
                     # Log the last 3 M1 candles used for confirmation
                     last3 = df_m1.iloc[-3:]
                     for idx, (ts, row) in enumerate(last3.iterrows()):
-                        ts_str = str(ts)[:16]
+                        # Convertiamo il timestamp nativo nell'orario esatto di Chicago (Grafico IBKR)
+                        if ts.tz is not None:
+                            ts_chart = ts.tz_convert("US/Central")
+                        else:
+                            ts_chart = ts - timedelta(hours=6)
+                        
+                        ts_str = ts_chart.strftime("%Y-%m-%d %H:%M")
                         bull = "▲" if row["close"] > row["open"] else ("▼" if row["close"] < row["open"] else "─")
                         logger.info(f"  M1[{idx}] [{ts_str}] O={row['open']:.1f} H={row['high']:.1f} "
                                     f"L={row['low']:.1f} C={row['close']:.1f} {bull}")
-
                     if not m1_confirmed:
                         logger.info(f"M1 2/3 NOT confirmed for {allowed_dir}")
                         time.sleep(30)

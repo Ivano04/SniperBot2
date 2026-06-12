@@ -319,12 +319,13 @@ def run(force_now: bool = False, force_entry: str | None = None):
                                 f"Zone={zone}, FVG={signal_fvg.type}, "
                                 f"Price={current_price}, Gap=({signal_fvg.bottom:.2f}-{signal_fvg.top:.2f})")
 
-                    # 5. Wait for M1 confirmation (ancorato al timestamp di chiusura della M5 che ha triggerato il segnale)
-                    m5_trigger_ts = df_m5.index[-2].to_pydatetime()
-                    target_epoch = m5_trigger_ts.timestamp() + 210  # 3 min + 30 s buffer
+                    # 5. Wait for M1 confirmation (ancorato alla CHIUSURA effettiva della M5, non al timestamp di inizio barra)
+                    m5_start_ts = df_m5.index[-2].to_pydatetime()
+                    m5_close_ts = m5_start_ts + timedelta(minutes=5)  # il timestamp IB e' l'inizio della barra
+                    target_epoch = m5_close_ts.timestamp() + 210  # 3 min + 30 s buffer
 
                     logger.info(
-                        f"Setup FVG rilevato (M5 close={m5_trigger_ts.strftime('%H:%M:%S')}). "
+                        f"Setup FVG rilevato (M5 close={m5_close_ts.strftime('%H:%M:%S')}). "
                         f"Attendo la formazione completa delle prossime 3 candele M1..."
                     )
 
@@ -343,9 +344,9 @@ def run(force_now: bool = False, force_entry: str | None = None):
                             logger.warning(f"Fetch M1 fallito (tentativo {attempt+1}): {e}")
                             time.sleep(RETRY_BASE_DELAY * (2 ** attempt))
 
-                    # Keep only M1 bars formed AFTER the triggering M5 close (Bug 7)
+                    # Keep only M1 bars formed AFTER the triggering M5 close
                     if not df_m1.empty:
-                        df_m1 = df_m1[df_m1.index >= pd.Timestamp(m5_trigger_ts)]
+                        df_m1 = df_m1[df_m1.index >= pd.Timestamp(m5_close_ts)]
 
                     if df_m1.empty or len(df_m1) < 3:
                         logger.warning("Dati M1 insufficienti o incompleti per la conferma, skip ciclo")
@@ -358,16 +359,15 @@ def run(force_now: bool = False, force_entry: str | None = None):
                     # Log the last 3 M1 candles used for confirmation
                     last3 = df_m1.iloc[-3:]
                     for idx, (ts, row) in enumerate(last3.iterrows()):
-                        # Convertiamo il timestamp nativo nell'orario esatto di Chicago (Grafico IBKR)
-                        if ts.tz is not None:
-                            ts_chart = ts.tz_convert("US/Central")
+                        ts_str = ts.strftime("%Y-%m-%d %H:%M") if hasattr(ts, "strftime") else str(ts)[:16]
+                        if row["close"] > row["open"]:
+                            dir_mark = "BULL"
+                        elif row["close"] < row["open"]:
+                            dir_mark = "BEAR"
                         else:
-                            ts_chart = ts - timedelta(hours=6)
-                        
-                        ts_str = ts_chart.strftime("%Y-%m-%d %H:%M")
-                        bull = "▲" if row["close"] > row["open"] else ("▼" if row["close"] < row["open"] else "─")
+                            dir_mark = "DOJI"
                         logger.info(f"  M1[{idx}] [{ts_str}] O={row['open']:.1f} H={row['high']:.1f} "
-                                    f"L={row['low']:.1f} C={row['close']:.1f} {bull}")
+                                    f"L={row['low']:.1f} C={row['close']:.1f} {dir_mark}")
                     if not m1_confirmed:
                         logger.info(f"M1 2/3 NOT confirmed for {allowed_dir}")
                         time.sleep(30)

@@ -1,3 +1,4 @@
+#salvataggio codice bot
 import math
 import time
 import signal
